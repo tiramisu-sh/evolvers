@@ -1,4 +1,5 @@
 """Evolvable: a function + criteria + LLM, with train/evaluate/save/load."""
+
 from __future__ import annotations
 
 import copy
@@ -10,9 +11,10 @@ import sys
 import textwrap
 import time
 import traceback
+from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any, Callable, Iterable
+from typing import Any
 
 from tqdm.auto import tqdm
 
@@ -59,11 +61,11 @@ class Evolvable:
             kwargs["llm"] = self.llm
         return self._compiled(*args, **kwargs)
 
-    def set_llm(self, llm: LLM) -> "Evolvable":
+    def set_llm(self, llm: LLM) -> Evolvable:
         self.llm = llm
         return self
 
-    def clone(self) -> "Evolvable":
+    def clone(self) -> Evolvable:
         new = Evolvable.__new__(Evolvable)
         new.llm = self.llm
         new.criteria = copy.deepcopy(self.criteria)
@@ -99,11 +101,17 @@ class Evolvable:
         baseline = self._run_eval(data, label="baseline", show_progress=show_progress, max_workers=max_workers)
         self._best_score = baseline["aggregate"]
         self._best_source = self._source
-        self.history.append({
-            "attempt": 0, "source": self._source, "score": baseline["aggregate"],
-            "per_criterion": baseline["per_criterion"], "result": baseline,
-            "accepted": True, "kind": "baseline",
-        })
+        self.history.append(
+            {
+                "attempt": 0,
+                "source": self._source,
+                "score": baseline["aggregate"],
+                "per_criterion": baseline["per_criterion"],
+                "result": baseline,
+                "accepted": True,
+                "kind": "baseline",
+            }
+        )
 
         iterator: Iterable[int] = range(1, budget + 1)
         if show_progress:
@@ -201,8 +209,7 @@ class Evolvable:
             "uri": uri,
             "signature": str(self._signature),
             "function_name": _extract_def_name(self._best_source),
-            "llm": {"model": self.llm.model, "provider": self.llm.provider,
-                    "base_url": self.llm.base_url},
+            "llm": {"model": self.llm.model, "provider": self.llm.provider, "base_url": self.llm.base_url},
             "variant": uri.split(":", 1)[1] if ":" in uri else None,
             "criteria": criteria_meta,
             "best_score": self._best_score,
@@ -213,7 +220,7 @@ class Evolvable:
         return path
 
     @classmethod
-    def load(cls, uri: str, *, llm: LLM | None = None) -> "Evolvable":
+    def load(cls, uri: str, *, llm: LLM | None = None) -> Evolvable:
         path = _cache_dir(uri)
         if not path.exists():
             raise FileNotFoundError(f"No artifact at {path}")
@@ -267,10 +274,12 @@ class Evolvable:
                 per_criterion[c.name] = {"score": -1.0, "reasoning": f"program failed: {err}"}
         else:
             with ThreadPoolExecutor(max_workers=min(max_workers, max(1, len(self.criteria)))) as ex:
-                results = list(ex.map(
-                    lambda c: (c.name, evaluate_criterion(c, program_input, output, self.llm)),
-                    self.criteria,
-                ))
+                results = list(
+                    ex.map(
+                        lambda c: (c.name, evaluate_criterion(c, program_input, output, self.llm)),
+                        self.criteria,
+                    )
+                )
             for name, (score, reasoning) in results:
                 per_criterion[name] = {"score": score, "reasoning": reasoning}
 
@@ -307,8 +316,7 @@ class Evolvable:
         else:
             with ThreadPoolExecutor(max_workers=min(max_workers, n)) as ex:
                 futures = {
-                    ex.submit(self._run_one_trial, row, idx, n, max_workers): idx
-                    for idx, row in enumerate(data)
+                    ex.submit(self._run_one_trial, row, idx, n, max_workers): idx for idx, row in enumerate(data)
                 }
                 for fut in futures:
                     idx = futures[fut]
@@ -364,8 +372,7 @@ class Evolvable:
                 for t in trials[:3]:
                     score_summary = {k: round(v["score"], 2) for k, v in t["per_criterion"].items()}
                     reasoning_summary = {
-                        k: _truncate(v.get("reasoning", "") or "", 200)
-                        for k, v in t["per_criterion"].items()
+                        k: _truncate(v.get("reasoning", "") or "", 200) for k, v in t["per_criterion"].items()
                     }
                     lines.append(
                         f"- input: {_truncate(repr(t['input']), 200)}\n"

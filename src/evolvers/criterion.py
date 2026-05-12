@@ -1,11 +1,13 @@
 """Criterion: judge (LLM-as-judge) and code (Python function) rubrics."""
+
 from __future__ import annotations
 
 import ast
 import inspect
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -20,12 +22,13 @@ class _JudgeResponse(BaseModel):
 @dataclass
 class Criterion:
     """One rubric. Either a natural-language judge or a Python function."""
+
     name: str
     kind: Kind
     weight: float = 1.0
-    question: str | None = None       # for kind="judge"
+    question: str | None = None  # for kind="judge"
     fn: Callable[..., float] | None = None  # for kind="code"
-    source_code: str | None = None    # captured for kind="code", to enable save/load
+    source_code: str | None = None  # captured for kind="code", to enable save/load
 
     def __post_init__(self) -> None:
         if self.kind == "judge" and not self.question:

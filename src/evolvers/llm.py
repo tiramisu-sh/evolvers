@@ -1,10 +1,12 @@
 """LLM wrapper: unified call/batch with optional structured output."""
+
 from __future__ import annotations
 
 import json
 import os
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Callable, Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
@@ -45,9 +47,11 @@ class LLM:
             return
         if self.provider == "anthropic":
             from anthropic import Anthropic
+
             self._client = Anthropic(api_key=self._api_key) if self._api_key else Anthropic()
         else:
             from openai import OpenAI
+
             self._client = OpenAI(
                 api_key=self._api_key or os.environ.get("OPENAI_API_KEY", "EMPTY"),
                 base_url=self.base_url,
@@ -94,11 +98,13 @@ class LLM:
             kwargs["system"] = system
 
         if schema is not None:
-            kwargs["tools"] = [{
-                "name": "respond",
-                "description": f"Provide a response matching the {schema.__name__} schema.",
-                "input_schema": schema.model_json_schema(),
-            }]
+            kwargs["tools"] = [
+                {
+                    "name": "respond",
+                    "description": f"Provide a response matching the {schema.__name__} schema.",
+                    "input_schema": schema.model_json_schema(),
+                }
+            ]
             kwargs["tool_choice"] = {"type": "tool", "name": "respond"}
             resp = self._client.messages.create(**kwargs)
             for block in resp.content:
@@ -136,13 +142,16 @@ class LLM:
             except Exception:
                 resp = self._client.chat.completions.create(
                     model=self.model,
-                    messages=[*messages[:-1], {
-                        "role": "user",
-                        "content": (
-                            f"{prompt}\n\nReply with a JSON object matching this schema:\n"
-                            f"{json.dumps(schema.model_json_schema(), indent=2)}"
-                        ),
-                    }],
+                    messages=[
+                        *messages[:-1],
+                        {
+                            "role": "user",
+                            "content": (
+                                f"{prompt}\n\nReply with a JSON object matching this schema:\n"
+                                f"{json.dumps(schema.model_json_schema(), indent=2)}"
+                            ),
+                        },
+                    ],
                     response_format={"type": "json_object"},
                     max_tokens=max_tokens,
                 )

@@ -1,4 +1,5 @@
 import os
+
 import evolvers as ev
 
 dataset = [  # the actual dataset shape should be huggingface-compatible; this one is just for example
@@ -26,7 +27,7 @@ eval_dataset = [
 # defining an evolvable function / program
 # `llm` is auto-injected at call time from the bound LLM on the Evolvable.
 def tldr_template(input_text: str, llm) -> str:
-    return input_text[:130] + '...'  # naive baseline; the optimizer rewrites this body
+    return input_text[:130] + "..."  # naive baseline; the optimizer rewrites this body
 
 
 # defining criteria for the evolvable function
@@ -75,7 +76,9 @@ metrics = tldr_local.evaluate(
     show_progress=True,
 )
 
-tldr_local.save("vvsotnikov/tldr-v1:qwen-3.6-32b")  # shares the same signature; optimized for a different LLM; docker image-inspired
+tldr_local.save(
+    "vvsotnikov/tldr-v1:qwen-3.6-32b"
+)  # shares the same signature; optimized for a different LLM; docker image-inspired
 
 # using the evolvable function
 tldr_local = ev.Evolvable.load("vvsotnikov/tldr-v1:qwen-3.6-32b")

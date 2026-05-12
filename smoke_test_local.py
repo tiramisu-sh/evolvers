@@ -2,13 +2,13 @@
 
 Run: uv run python -u smoke_test_local.py 2>&1 | tee smoke_test_local.log
 """
+
 import os
 import tempfile
 
 os.environ.setdefault("EVOLVERS_CACHE", tempfile.mkdtemp(prefix="evolvers_smoke_"))
 
 import evolvers as ev
-
 
 DATASET = [
     "A new study from Stanford and MIT (published in Nature, May 2026) found that "
@@ -25,8 +25,7 @@ def tldr(input_text: str, llm) -> str:
 
 def main() -> None:
     cr_essential = ev.judge(
-        "Does it directly summarize the main points as a TLDR "
-        "(concise, captures the key claim and its implication)?",
+        "Does it directly summarize the main points as a TLDR (concise, captures the key claim and its implication)?",
         name="essential",
     )
     cr_length = ev.code(

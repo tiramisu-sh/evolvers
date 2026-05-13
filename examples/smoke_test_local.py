@@ -1,6 +1,6 @@
 """Tight smoke test: 1 example, budget=1, against local vLLM (deepkek).
 
-Run: uv run python -u smoke_test_local.py 2>&1 | tee smoke_test_local.log
+Run: uv run python -u examples/smoke_test_local.py 2>&1 | tee smoke_test_local.log
 """
 
 import os

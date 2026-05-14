@@ -1,5 +1,11 @@
 # evolvers
 
+[![PyPI](https://img.shields.io/pypi/v/evolvers.svg)](https://pypi.org/project/evolvers/)
+[![CI](https://github.com/tiramisu-sh/evolvers/actions/workflows/ci.yml/badge.svg)](https://github.com/tiramisu-sh/evolvers/actions/workflows/ci.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/pypi/pyversions/evolvers.svg)](https://pypi.org/project/evolvers/)
+[![Downloads](https://img.shields.io/pypi/dm/evolvers.svg)](https://pypi.org/project/evolvers/)
+
 Evolvable AI programs: define a Python function + criteria of success, the bound LLM iteratively rewrites the function body to maximize the criteria score.
 
 > **Status: early PoC.** APIs will change.

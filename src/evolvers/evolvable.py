@@ -115,12 +115,17 @@ class Evolvable:
         self,
         dataset: Iterable[Any],
         *,
-        budget: int = 20,
+        num_train_epochs: int = 20,
         show_progress: bool = True,
     ) -> dict[str, Any]:
-        """Propose-test-accept-or-revert loop (async). Concurrency lives on self.llm."""
+        """Propose-test-accept-or-revert loop (async). Concurrency lives on self.llm.
+
+        `num_train_epochs` (TRL convention): how many propose + full-dataset-eval cycles
+        to run. Each epoch produces one new candidate function body, evaluates it across
+        the full dataset, and accepts if the aggregate score improves over the best so far.
+        """
         data = list(dataset)
-        _log(f"train: budget={budget}, dataset_size={len(data)}, criteria={[c.name for c in self.criteria]}")
+        _log(f"train: num_train_epochs={num_train_epochs}, dataset_size={len(data)}, criteria={[c.name for c in self.criteria]}")
 
         _log("train: running baseline eval...")
         baseline = await self._run_eval(data, label="baseline", show_progress=show_progress)
@@ -128,7 +133,7 @@ class Evolvable:
         self._best_source = self._source
         self.history.append(
             {
-                "attempt": 0,
+                "epoch": 0,
                 "source": self._source,
                 "score": baseline["aggregate"],
                 "per_criterion": baseline["per_criterion"],
@@ -138,38 +143,38 @@ class Evolvable:
             }
         )
 
-        iterator: Iterable[int] = range(1, budget + 1)
+        iterator: Iterable[int] = range(1, num_train_epochs + 1)
         if show_progress:
-            iterator = tqdm(iterator, desc="evolve", total=budget)
+            iterator = tqdm(iterator, desc="evolve", total=num_train_epochs)
 
-        for attempt in iterator:
-            entry: dict[str, Any] = {"attempt": attempt, "accepted": False}
-            _log(f"train: attempt {attempt}/{budget} — proposing mutation...")
+        for epoch in iterator:
+            entry: dict[str, Any] = {"epoch": epoch, "accepted": False}
+            _log(f"train: epoch {epoch}/{num_train_epochs} — proposing mutation...")
             t_propose = time.perf_counter()
             try:
                 new_source = await self._propose_mutation()
             except Exception as e:
                 entry["error"] = f"propose failed: {type(e).__name__}: {e}"
-                _log(f"train: attempt {attempt} — {entry['error']}")
+                _log(f"train: epoch {epoch} — {entry['error']}")
                 self.history.append(entry)
                 continue
             propose_elapsed = time.perf_counter() - t_propose
-            _log(f"train: attempt {attempt} — mutation proposed ({propose_elapsed:.1f}s, {len(new_source)} chars)")
+            _log(f"train: epoch {epoch} — mutation proposed ({propose_elapsed:.1f}s, {len(new_source)} chars)")
 
             try:
                 new_fn = _compile_fn(new_source)
             except Exception as e:
                 entry["source"] = new_source
                 entry["error"] = f"compile failed: {type(e).__name__}: {e}"
-                _log(f"train: attempt {attempt} — compile failed: {e}")
+                _log(f"train: epoch {epoch} — compile failed: {e}")
                 self.history.append(entry)
                 continue
 
             prev_compiled = self._compiled
             self._compiled = new_fn
-            _log(f"train: attempt {attempt} — evaluating new candidate...")
+            _log(f"train: epoch {epoch} — evaluating new candidate...")
             try:
-                result = await self._run_eval(data, label=f"attempt {attempt}", show_progress=False)
+                result = await self._run_eval(data, label=f"epoch {epoch}", show_progress=False)
                 entry["score"] = result["aggregate"]
                 entry["per_criterion"] = result["per_criterion"]
                 entry["source"] = new_source
@@ -179,11 +184,11 @@ class Evolvable:
                     self._best_score = result["aggregate"]
                     self._best_source = new_source
                     entry["accepted"] = True
-                    _log(f"train: attempt {attempt} — ACCEPTED, new best aggregate={result['aggregate']:.3f}")
+                    _log(f"train: epoch {epoch} — ACCEPTED, new best aggregate={result['aggregate']:.3f}")
                 else:
                     self._compiled = prev_compiled
                     _log(
-                        f"train: attempt {attempt} — REVERTED, "
+                        f"train: epoch {epoch} — REVERTED, "
                         f"aggregate={result['aggregate']:.3f} <= best={self._best_score:.3f}"
                     )
             except Exception as e:
@@ -191,7 +196,7 @@ class Evolvable:
                 entry["source"] = new_source
                 entry["error"] = f"eval failed: {type(e).__name__}: {e}"
                 entry["traceback"] = traceback.format_exc(limit=3)
-                _log(f"train: attempt {attempt} — eval crashed: {e}")
+                _log(f"train: epoch {epoch} — eval crashed: {e}")
 
             self.history.append(entry)
 
@@ -361,7 +366,7 @@ class Evolvable:
     async def _propose_mutation(self) -> str:
         recent = [h for h in self.history if "score" in h][-3:]
         if not recent:
-            recent = [{"attempt": 0, "source": self._best_source, "score": self._best_score or 0.0}]
+            recent = [{"epoch": 0, "source": self._best_source, "score": self._best_score or 0.0}]
 
         criteria_desc = "\n".join(
             f"- {c.name} (weight={c.weight:.2f}, kind={c.kind}): "
@@ -372,7 +377,7 @@ class Evolvable:
         history_lines = []
         for h in recent:
             score = h.get("score") if h.get("score") is not None else 0.0
-            block = f"Attempt {h['attempt']} (score={score:.3f}):\n```python\n{h.get('source', '')}\n```"
+            block = f"Epoch {h['epoch']} (score={score:.3f}):\n```python\n{h.get('source', '')}\n```"
             history_lines.append(block)
         history_block = "\n\n".join(history_lines)
 
@@ -408,7 +413,7 @@ class Evolvable:
             Criteria:
             {criteria_desc}
 
-            Recent attempts:
+            Recent epochs:
             {history_block}
 
             {last_trials_block}

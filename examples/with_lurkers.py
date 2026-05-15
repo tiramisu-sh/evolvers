@@ -84,7 +84,7 @@ async def main() -> None:
     evo = ev.Evolvable(tldr, criteria=[cr_essential, cr_length], llm=llm)
 
     print("\n=== training ===", flush=True)
-    await evo.train(dataset, budget=2, show_progress=False)
+    await evo.train(dataset, num_train_epochs=2, show_progress=False)
 
     print("\n=== best source ===", flush=True)
     print(evo.source, flush=True)

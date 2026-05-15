@@ -63,7 +63,7 @@ async def main() -> None:
     # training the evolvable function
     await tldr_opus.train(
         dataset=dataset,
-        budget=10,
+        num_train_epochs=10,
         show_progress=True,
     )
 
@@ -88,7 +88,7 @@ async def main() -> None:
 
     await tldr_local.train(
         dataset=dataset,
-        budget=10,
+        num_train_epochs=10,
         show_progress=True,
     )
 

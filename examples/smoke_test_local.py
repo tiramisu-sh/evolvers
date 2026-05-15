@@ -1,4 +1,4 @@
-"""Tight smoke test: 1 example, budget=1, against local vLLM (deepkek).
+"""Tight smoke test: 1 example, num_train_epochs=1, against local vLLM (deepkek).
 
 Run: uv run python -u examples/smoke_test_local.py 2>&1 | tee smoke_test_local.log
 """
@@ -37,8 +37,8 @@ async def main() -> None:
     llm = ev.LLM(model="deepkek", base_url="http://localhost:8001/v1", api_key="dummy", max_concurrency=16)
     evo = ev.Evolvable(tldr, criteria=[cr_essential, cr_length], llm=llm)
 
-    print("=== train budget=1 ===", flush=True)
-    result = await evo.train(DATASET, budget=1, show_progress=False)
+    print("=== train num_train_epochs=1 ===", flush=True)
+    result = await evo.train(DATASET, num_train_epochs=1, show_progress=False)
     print(f"best_score={result['best_score']:.3f}", flush=True)
 
     print("=== best source ===", flush=True)

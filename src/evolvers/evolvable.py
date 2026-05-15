@@ -1,7 +1,15 @@
-"""Evolvable: a function + criteria + LLM, with train/evaluate/save/load."""
+"""Evolvable: a function + criteria + LLM, with train/evaluate/save/load.
+
+Async-primary: `train`, `evaluate`, `__call__` are coroutines. Sync convenience
+wrappers (`train_sync`, `evaluate_sync`, `call_sync`) spin an event loop per call.
+
+Concurrency is owned by the LLM (via its `max_concurrency`); Evolvable just
+fires every (item, rubric) pair as a coroutine and `asyncio.gather`s them.
+"""
 
 from __future__ import annotations
 
+import asyncio
 import copy
 import inspect
 import json
@@ -12,7 +20,6 @@ import textwrap
 import time
 import traceback
 from collections.abc import Callable, Iterable
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +39,10 @@ class Evolvable:
 
     The function may take an `llm` parameter; if present, the bound LLM is auto-injected
     on each call. Persistence is to a directory under EVOLVERS_CACHE (default ~/.cache/evolvers/).
+
+    The user-supplied function may be either sync or async. Async is preferred when the
+    function calls the LLM (use `await llm(prompt)` directly). Sync functions calling the
+    LLM should use the sync wrappers (`llm.call_sync(...)`, `llm.batch_sync(...)`).
     """
 
     def __init__(
@@ -56,10 +67,21 @@ class Evolvable:
     def source(self) -> str:
         return self._best_source
 
-    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+    async def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        """Async call. Awaits the compiled function if async; runs in a thread if sync.
+
+        Either path returns the function's result. If the function declares an `llm` param,
+        the bound LLM is auto-injected.
+        """
         if "llm" in self._signature.parameters and "llm" not in kwargs:
             kwargs["llm"] = self.llm
-        return self._compiled(*args, **kwargs)
+        if asyncio.iscoroutinefunction(self._compiled):
+            return await self._compiled(*args, **kwargs)
+        return await asyncio.to_thread(self._compiled, *args, **kwargs)
+
+    def call_sync(self, *args: Any, **kwargs: Any) -> Any:
+        """Sync wrapper around __call__. Spins up an event loop via asyncio.run."""
+        return asyncio.run(self(*args, **kwargs))
 
     def set_llm(self, llm: LLM) -> Evolvable:
         self.llm = llm
@@ -77,28 +99,31 @@ class Evolvable:
         new.history = []
         return new
 
-    def evaluate(
+    async def evaluate(
         self,
         dataset: Iterable[Any],
         *,
         show_progress: bool = True,
-        max_workers: int = 8,
     ) -> dict[str, Any]:
-        return self._run_eval(list(dataset), label="eval", show_progress=show_progress, max_workers=max_workers)
+        """Evaluate on dataset (async). Concurrency is gated by self.llm.max_concurrency."""
+        return await self._run_eval(list(dataset), label="eval", show_progress=show_progress)
 
-    def train(
+    def evaluate_sync(self, dataset: Iterable[Any], **kwargs: Any) -> dict[str, Any]:
+        return asyncio.run(self.evaluate(dataset, **kwargs))
+
+    async def train(
         self,
         dataset: Iterable[Any],
         *,
         budget: int = 20,
         show_progress: bool = True,
-        max_workers: int = 8,
     ) -> dict[str, Any]:
+        """Propose-test-accept-or-revert loop (async). Concurrency lives on self.llm."""
         data = list(dataset)
         _log(f"train: budget={budget}, dataset_size={len(data)}, criteria={[c.name for c in self.criteria]}")
 
         _log("train: running baseline eval...")
-        baseline = self._run_eval(data, label="baseline", show_progress=show_progress, max_workers=max_workers)
+        baseline = await self._run_eval(data, label="baseline", show_progress=show_progress)
         self._best_score = baseline["aggregate"]
         self._best_source = self._source
         self.history.append(
@@ -122,7 +147,7 @@ class Evolvable:
             _log(f"train: attempt {attempt}/{budget} — proposing mutation...")
             t_propose = time.perf_counter()
             try:
-                new_source = self._propose_mutation()
+                new_source = await self._propose_mutation()
             except Exception as e:
                 entry["error"] = f"propose failed: {type(e).__name__}: {e}"
                 _log(f"train: attempt {attempt} — {entry['error']}")
@@ -144,7 +169,7 @@ class Evolvable:
             self._compiled = new_fn
             _log(f"train: attempt {attempt} — evaluating new candidate...")
             try:
-                result = self._run_eval(data, label=f"attempt {attempt}", show_progress=False, max_workers=max_workers)
+                result = await self._run_eval(data, label=f"attempt {attempt}", show_progress=False)
                 entry["score"] = result["aggregate"]
                 entry["per_criterion"] = result["per_criterion"]
                 entry["source"] = new_source
@@ -178,6 +203,9 @@ class Evolvable:
             "best_source": self._best_source,
             "history": self.history,
         }
+
+    def train_sync(self, dataset: Iterable[Any], **kwargs: Any) -> dict[str, Any]:
+        return asyncio.run(self.train(dataset, **kwargs))
 
     def save(self, uri: str) -> Path:
         path = _cache_dir(uri)
@@ -256,12 +284,12 @@ class Evolvable:
         _log(f"loaded {uri} (best_score={manifest.get('best_score')})")
         return instance
 
-    def _run_one_trial(self, row: Any, idx: int, total: int, max_workers: int) -> dict[str, Any]:
+    async def _run_one_trial(self, row: Any, idx: int, total: int) -> dict[str, Any]:
         program_input, call_args, call_kwargs = _row_to_call(row, self._signature)
         _log(f"  trial {idx + 1}/{total} starting (input={_truncate(repr(program_input), 80)})")
         t0 = time.perf_counter()
         try:
-            output = self(*call_args, **call_kwargs)
+            output = await self(*call_args, **call_kwargs)
             err = None
         except Exception as e:
             output = None
@@ -273,15 +301,12 @@ class Evolvable:
             for c in self.criteria:
                 per_criterion[c.name] = {"score": -1.0, "reasoning": f"program failed: {err}"}
         else:
-            with ThreadPoolExecutor(max_workers=min(max_workers, max(1, len(self.criteria)))) as ex:
-                results = list(
-                    ex.map(
-                        lambda c: (c.name, evaluate_criterion(c, program_input, output, self.llm)),
-                        self.criteria,
-                    )
-                )
-            for name, (score, reasoning) in results:
-                per_criterion[name] = {"score": score, "reasoning": reasoning}
+            # All criteria fire as coroutines; LLM's semaphore gates transport-layer concurrency.
+            results = await asyncio.gather(
+                *(evaluate_criterion(c, program_input, output, self.llm) for c in self.criteria)
+            )
+            for c, (score, reasoning) in zip(self.criteria, results):
+                per_criterion[c.name] = {"score": score, "reasoning": reasoning}
 
         scores_summary = {k: round(v["score"], 2) for k, v in per_criterion.items()}
         elapsed = time.perf_counter() - t0
@@ -297,33 +322,21 @@ class Evolvable:
             "per_criterion": per_criterion,
         }
 
-    def _run_eval(
+    async def _run_eval(
         self,
         data: list[Any],
         *,
         label: str,
         show_progress: bool,
-        max_workers: int,
     ) -> dict[str, Any]:
         n = len(data)
-        _log(f"eval [{label}]: starting on {n} rows (max_workers={max_workers})")
+        _log(f"eval [{label}]: starting on {n} rows (llm.max_concurrency={self.llm.max_concurrency})")
         t0 = time.perf_counter()
 
-        trials_indexed: list[tuple[int, dict[str, Any]]] = []
-        if n == 1 or max_workers <= 1:
-            for idx, row in enumerate(data):
-                trials_indexed.append((idx, self._run_one_trial(row, idx, n, max_workers)))
-        else:
-            with ThreadPoolExecutor(max_workers=min(max_workers, n)) as ex:
-                futures = {
-                    ex.submit(self._run_one_trial, row, idx, n, max_workers): idx for idx, row in enumerate(data)
-                }
-                for fut in futures:
-                    idx = futures[fut]
-                    trials_indexed.append((idx, fut.result()))
-
-        trials_indexed.sort(key=lambda x: x[0])
-        trials = [t for _, t in trials_indexed]
+        # All trials fire concurrently; LLM's internal semaphore gates the actual transport.
+        trials = await asyncio.gather(
+            *(self._run_one_trial(row, idx, n) for idx, row in enumerate(data))
+        )
 
         per_criterion_mean: dict[str, float] = {}
         total_weight = sum(c.weight for c in self.criteria) or 1.0
@@ -345,7 +358,7 @@ class Evolvable:
             "label": label,
         }
 
-    def _propose_mutation(self) -> str:
+    async def _propose_mutation(self) -> str:
         recent = [h for h in self.history if "score" in h][-3:]
         if not recent:
             recent = [{"attempt": 0, "source": self._best_source, "score": self._best_score or 0.0}]
@@ -400,10 +413,17 @@ class Evolvable:
 
             {last_trials_block}
 
-            You may use the injected `llm` callable inside the function. Its signature:
-              llm(prompt: str, *, schema: type[BaseModel] | None = None,
-                  system: str | None = None) -> str | BaseModel
-              llm.batch(prompts: list[str], **kwargs) -> list
+            You may use the injected `llm` callable inside the function. It is async-primary.
+
+            If your function is `async def`, await llm calls:
+              await llm(prompt, *, schema=..., system=...)         # → str | BaseModel
+              await llm.batch(prompts, **kwargs)                    # → list
+
+            If your function is sync `def`, use the sync wrappers (slower; spins an event loop per call):
+              llm.call_sync(prompt, *, schema=..., system=...)
+              llm.batch_sync(prompts, **kwargs)
+
+            Prefer `async def` when the function makes any LLM calls.
 
             IMPORTANT — token budgets:
             - The injected `llm` is a 2026-era reasoning model. It uses substantial tokens for internal
@@ -418,7 +438,7 @@ class Evolvable:
             - Do not include explanations outside the code block.
             """)
 
-        response = self.llm(
+        response = await self.llm(
             prompt,
             system=(
                 "You are an expert Python programmer iteratively refining a function under criteria. "
@@ -458,7 +478,7 @@ def _extract_python(text: str) -> str:
 
 
 def _extract_def_name(source: str) -> str | None:
-    m = re.search(r"^def\s+(\w+)\s*\(", source, re.MULTILINE)
+    m = re.search(r"^(?:async\s+)?def\s+(\w+)\s*\(", source, re.MULTILINE)
     return m.group(1) if m else None
 
 

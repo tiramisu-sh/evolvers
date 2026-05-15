@@ -74,16 +74,20 @@ def code(
     )
 
 
-def evaluate_criterion(
+async def evaluate_criterion(
     c: Criterion,
     program_input: Any,
     program_output: Any,
     llm: Any,
 ) -> tuple[float, str]:
-    """Run one criterion. Returns (score, reasoning). Score is clamped to [-1, 1]."""
+    """Run one criterion (async). Returns (score, reasoning). Score is clamped to [-1, 1].
+
+    Async because judge criteria call the LLM; code criteria run pure-Python and
+    return immediately. The async wrapper composes either path.
+    """
     if c.kind == "code":
         return _evaluate_code(c, program_input, program_output)
-    return _evaluate_judge(c, program_input, program_output, llm)
+    return await _evaluate_judge(c, program_input, program_output, llm)
 
 
 def _evaluate_code(c: Criterion, program_input: Any, program_output: Any) -> tuple[float, str]:
@@ -105,7 +109,7 @@ def _evaluate_code(c: Criterion, program_input: Any, program_output: Any) -> tup
     return _clamp(value), f"code returned {value:.4f}"
 
 
-def _evaluate_judge(
+async def _evaluate_judge(
     c: Criterion,
     program_input: Any,
     program_output: Any,
@@ -120,7 +124,7 @@ def _evaluate_judge(
         f"and concise reasoning."
     )
     try:
-        resp = llm(prompt, schema=_JudgeResponse)
+        resp = await llm(prompt, schema=_JudgeResponse)
     except Exception as e:
         return 0.0, f"judge LLM failed ({type(e).__name__}: {e}); neutral score"
     return _clamp(resp.score), resp.reasoning

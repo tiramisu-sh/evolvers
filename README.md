@@ -54,6 +54,7 @@ async def main():
     )
 
     await evo.train(dataset, num_train_epochs=10)
+    print(evo.source)  # the function body the optimizer settled on
     evo.save("you/tldr-v1:claude-opus-4-7")
 
     reloaded = ev.Evolvable.load("you/tldr-v1:claude-opus-4-7")

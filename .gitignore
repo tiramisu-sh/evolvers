@@ -16,3 +16,6 @@ wheels/
 # pytest / ruff caches
 .pytest_cache/
 .ruff_cache/
+
+# bench transient outputs (timestamped JSON dumps from examples/bench_evaluator.py)
+bench_*.json

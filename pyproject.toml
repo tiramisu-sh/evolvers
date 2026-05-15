@@ -3,7 +3,7 @@ name = "evolvers"
 version = "0.1.0"
 description = "Evolvable AI programs: define a function + criteria, let an LLM iteratively improve it"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.13"
 license = { file = "LICENSE" }
 authors = [
     { name = "Vladimir Sotnikov", email = "vladimir.s@alphakek.ai" },
@@ -14,9 +14,6 @@ classifiers = [
     "Intended Audience :: Developers",
     "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Typing :: Typed",
@@ -51,7 +48,7 @@ dev = [
 
 [tool.ruff]
 line-length = 120
-target-version = "py310"
+target-version = "py313"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "C4", "UP", "SIM", "RUF"]
@@ -68,7 +65,7 @@ testpaths = ["tests"]
 pythonpath = ["src"]
 
 [tool.ty.environment]
-python-version = "3.10"
+python-version = "3.13"
 
 [tool.ty.src]
 include = ["src", "tests"]

@@ -22,6 +22,7 @@ repos:
         entry: uv run ty check
         pass_filenames: false
         stages: [pre-commit]
+        types: [python]
 
       - id: pytest
         name: pytest
@@ -29,3 +30,6 @@ repos:
         entry: uv run pytest -q
         pass_filenames: false
         stages: [pre-commit]
+        # Skip pure docs/config commits; pyproject.toml is in scope because dep
+        # changes affect test behavior.
+        types_or: [python, toml]

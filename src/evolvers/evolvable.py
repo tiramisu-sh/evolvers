@@ -368,10 +368,16 @@ class Evolvable:
         if not recent:
             recent = [{"epoch": 0, "source": self._best_source, "score": self._best_score or 0.0}]
 
+        def _desc(c: Criterion) -> str:
+            if c.kind == "judge":
+                # __post_init__ enforces this; assert narrows for the type-checker
+                # and fails loudly if a future load-path bypasses the constructor.
+                assert c.question
+                return c.question
+            return c.source_code or "<code>"
+
         criteria_desc = "\n".join(
-            f"- {c.name} (weight={c.weight:.2f}, kind={c.kind}): "
-            + ((c.question or "<judge>") if c.kind == "judge" else (c.source_code or "<code>"))
-            for c in self.criteria
+            f"- {c.name} (weight={c.weight:.2f}, kind={c.kind}): " + _desc(c) for c in self.criteria
         )
 
         history_lines = []

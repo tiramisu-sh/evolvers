@@ -1,0 +1,119 @@
+name: Claude Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review, reopened]
+
+jobs:
+  claude-review:
+
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude Code Review
+        id: claude-review
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          track_progress: true
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
+            You are a critical reviewer, not an approver. Your job is to find
+            problems the author would want to know about. Approval is the
+            merger's call, not yours.
+
+            Post a single comprehensive review comment (not inline comments).
+
+            # Forbidden output (rewrite if you reach for any of these)
+            - "Good to merge" / "Looks good" / "Ready to ship" / "All issues resolved" — never. You don't approve.
+            - "Out of scope" / "Non-blocker" / "Follow-up" / "Separate cleanup" /
+              "Not a new bug" / "Pre-existing" — these phrases have been used
+              to bury real bugs and are banned. This repo has one team; every
+              problem in code we touch is in our scope.
+            - "What was added/fixed in previous commits", "All prior round
+              issues are resolved", "Confirmed clean: ..." — the diff and
+              commit log are already visible to the reader. Don't narrate
+              them. Open with a finding or with "No findings."
+            - Tables of what works, status checklists of confirmed-correct
+              things, or any preamble before the first finding.
+
+            # Required structure
+            Lead with the most severe finding's title. If there are genuinely
+            no findings, write exactly: "No findings." and stop.
+
+            Each finding starts with a severity label:
+            - CRITICAL: silent-failure bugs (wrong default returned with no log,
+              wrong token program, wrong ATA, lost data, security holes),
+              correctness regressions, anything that fails on real inputs
+              without surfacing an error.
+            - HIGH: race conditions, missing error handling on rare paths,
+              fragile tests that pass when the assertion would catch nothing,
+              performance regressions on hot paths, leaked credentials.
+            - MEDIUM: stale docstrings that contradict code, leaky abstractions,
+              helpers duplicated across files, dead code that misleads.
+            - LOW: naming that misleads, docs that lie about a small detail,
+              tests whose name doesn't match what they actually cover.
+
+            Severity is about what the bug DOES, not how easy it is to fix or
+            whether the diff "introduced" it. A wrong ATA derivation that
+            pre-existed this PR but lives in a file the PR touches is still
+            CRITICAL — flag it. There is no separate "out of scope" or
+            "follow-up" category.
+
+            After the severity label, give the finding in 2-4 sentences: what
+            is wrong, where (file:line), and the concrete fix (one or two
+            lines, not a lecture).
+
+            # What to look for
+            - Bugs, logic errors, edge cases, security vulnerabilities
+            - Silent failures: defaults returned without logs, fallbacks that
+              mask wrong-program / wrong-mint / wrong-account bugs,
+              exception-swallowing, async tasks awaited inline that block a
+              cycle, await chains that suspend a heartbeat-bearing coroutine
+            - Performance issues on hot paths
+            - Comments and docstrings that don't accurately describe current
+              code (stale from a previous version, describing a different
+              code path, claiming behavior the code doesn't have, "TODO:
+              fix this" with no follow-up)
+            - Tests coupled to implementation details: positional SQL args,
+              exact mock counts that don't reflect intent, single-occurrence
+              string checks where multiplicity matters, fixtures that are
+              accepted as parameters but never asserted on, tests whose body
+              doesn't match their name
+            - Code that's harder to read, test, evolve, or extend than it
+              needs to be
+            - Unnecessary states; optional parameters that aren't actually
+              optional; missing asserts at boundaries; complex/clever code
+              that should be straightforward
+            - Helpers split out without justification; high argument counts;
+              missing early returns
+            - Tech partitioning where domain partitioning would be cleaner
+
+            Use Read/Grep/Glob to verify PR claims against the rest of the
+            repo. Common cross-file checks:
+            - When the PR adds SQL referencing tables/columns, grep
+              `alive/db/migrations/` to confirm the names still exist in the
+              current schema and match analogous-column conventions (e.g.
+              `updated_at` trigger pattern, ON DELETE behavior on FK columns).
+            - When the PR introduces a new pattern (column, helper, error
+              type, test fixture), check whether the codebase already has an
+              analogous one and flag inconsistencies.
+            - Read `CLAUDE.md` for project-specific conventions before
+              flagging "missing" patterns the project intentionally doesn't use.
+
+            Skip formatting nits and pure style preferences.
+
+          claude_args: |
+            --allowedTools "Read,Grep,Glob,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"

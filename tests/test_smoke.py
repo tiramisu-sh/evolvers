@@ -71,7 +71,25 @@ def test_evolvable_save_load(tmp_path, monkeypatch):
     assert reloaded.call_sync("hello world " * 30) == evo.call_sync("hello world " * 30)
     assert len(reloaded.criteria) == 1
     assert reloaded.criteria[0].name == "length"
-    assert reloaded.criteria[0].fn("x" * 300) == -1.0
+    fn = reloaded.criteria[0].fn
+    assert fn is not None
+    assert fn("x" * 300) == -1.0
+
+
+def test_evolvable_evaluate_with_dict_rows():
+    """Regression: _row_to_call's dict-row path used to iterate sig.parameters
+    (yielding str keys) and call .name on each — would AttributeError on any
+    dict-row input. evaluate_sync exercises the real path end-to-end."""
+
+    def tldr(input_text: str, llm) -> str:
+        return input_text[:130] + "..."
+
+    cr = ev.code(lambda output_text: 1.0, name="trivial")
+    llm = ev.LLM(model="claude-opus-4-7")
+    evo = ev.Evolvable(tldr, criteria=[cr], llm=llm)
+
+    result = evo.evaluate_sync([{"input_text": "hello world"}])
+    assert result["aggregate"] == 1.0
 
 
 def test_evolvable_clone_and_set_llm():

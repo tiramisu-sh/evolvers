@@ -1,0 +1,32 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.0
+    hooks:
+      - id: ruff-check
+        args: [--fix, --exit-non-zero-on-fix]
+      - id: ruff-format
+
+  - repo: https://github.com/astral-sh/uv-pre-commit
+    rev: 0.9.30
+    hooks:
+      - id: uv-lock
+
+  - repo: local
+    hooks:
+      - id: ty
+        name: ty
+        language: system
+        entry: uv run ty check
+        pass_filenames: false
+        stages: [pre-commit]
+        types: [python]
+
+      - id: pytest
+        name: pytest
+        language: system
+        entry: uv run pytest -q
+        pass_filenames: false
+        stages: [pre-commit]
+        # Skip pure docs/config commits; pyproject.toml is in scope because dep
+        # changes affect test behavior.
+        types_or: [python, toml]

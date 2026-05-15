@@ -47,7 +47,7 @@ def test_evolvable_local_call():
     llm = ev.LLM(model="claude-opus-4-7")
     evo = ev.Evolvable(tldr, criteria=[cr_len], llm=llm)
 
-    result = evo("hello world " * 30)
+    result = evo.call_sync("hello world " * 30)
     assert isinstance(result, str)
     assert len(result) <= 140
 
@@ -68,7 +68,7 @@ def test_evolvable_save_load(tmp_path, monkeypatch):
     evo.save("test/tldr-v0:test")
     reloaded = ev.Evolvable.load("test/tldr-v0:test")
 
-    assert reloaded("hello world " * 30) == evo("hello world " * 30)
+    assert reloaded.call_sync("hello world " * 30) == evo.call_sync("hello world " * 30)
     assert len(reloaded.criteria) == 1
     assert reloaded.criteria[0].name == "length"
     assert reloaded.criteria[0].fn("x" * 300) == -1.0

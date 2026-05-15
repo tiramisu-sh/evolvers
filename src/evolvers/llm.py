@@ -60,9 +60,7 @@ class LLM:
         if self.provider == "anthropic":
             from anthropic import AsyncAnthropic
 
-            self._client = (
-                AsyncAnthropic(api_key=self._api_key) if self._api_key else AsyncAnthropic()
-            )
+            self._client = AsyncAnthropic(api_key=self._api_key) if self._api_key else AsyncAnthropic()
         else:
             from openai import AsyncOpenAI
 
@@ -193,7 +191,4 @@ class LLM:
         return resp.choices[0].message.content or ""
 
     def __repr__(self) -> str:
-        return (
-            f"LLM(model={self.model!r}, provider={self.provider!r}, "
-            f"max_concurrency={self.max_concurrency})"
-        )
+        return f"LLM(model={self.model!r}, provider={self.provider!r}, max_concurrency={self.max_concurrency})"

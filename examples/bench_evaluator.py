@@ -24,10 +24,10 @@ import time
 import urllib.request
 from statistics import mean
 
+import lurkers
 from pydantic import BaseModel
 
 import evolvers as ev
-import lurkers
 
 # ─────────────────────────────────────────── config ──
 
@@ -60,15 +60,14 @@ class JudgeResponse(BaseModel):
 def fetch_dataset(n_needed: int) -> list[str]:
     """Pull base inputs from HN RSS, then pad to n_needed by cycling with a
     cache-busting suffix so vLLM's prefix-cache doesn't skew results."""
-    print(f"fetching base dataset from HN RSS...", flush=True)
+    print("fetching base dataset from HN RSS...", flush=True)
     docs = lurkers.feed(HN_RSS, limit=30)
     base = [d.content for d in docs if d.content and len(d.content.strip()) > 100]
     if not base:
         # fallback if HN is unreachable; still gives unique enough inputs for a bench
         base = [
             "The article discusses recent developments in artificial intelligence and "
-            "their impact on software engineering productivity. " * 8
-            + f" Article {i}."
+            "their impact on software engineering productivity. " * 8 + f" Article {i}."
             for i in range(30)
         ]
     print(f"  got {len(base)} unique base items (avg {mean(len(b) for b in base):.0f} chars)", flush=True)
@@ -95,9 +94,7 @@ def make_judge_prompt(text: str) -> str:
 def parse_prometheus(text: str) -> dict[str, float]:
     """Minimal prometheus text-format parser. Returns flat dict, labels embedded in key."""
     out: dict[str, float] = {}
-    line_re = re.compile(
-        r"^([a-zA-Z_:][a-zA-Z0-9_:]*(?:\{[^}]*\})?)\s+([0-9.eE+\-]+|NaN|\+Inf|\-Inf)"
-    )
+    line_re = re.compile(r"^([a-zA-Z_:][a-zA-Z0-9_:]*(?:\{[^}]*\})?)\s+([0-9.eE+\-]+|NaN|\+Inf|\-Inf)")
     for line in text.splitlines():
         line = line.strip()
         if not line or line.startswith("#"):
@@ -146,29 +143,23 @@ async def run_one_batch(
 
     n = len(prompts)
     t0 = time.perf_counter()
-    completed = 0
     failures = 0
     last_print = t0 - 1  # force first paint immediately
 
     # asyncio.as_completed yields futures in completion order — perfect for progress.
     coros = [llm(p, schema=JudgeResponse) for p in prompts]
-    for fut in asyncio.as_completed(coros):
+    for completed, fut in enumerate(asyncio.as_completed(coros), start=1):
         try:
             await fut
         except Exception:
             failures += 1
-        completed += 1
         now = time.perf_counter()
         if now - last_print > 0.25 or completed == n:
             elapsed = now - t0
             rate = completed / elapsed if elapsed > 0 else 0
             eta = (n - completed) / rate if rate > 0 else float("inf")
             eta_str = f"{eta:.1f}s" if eta != float("inf") else "—"
-            msg = (
-                f"  {label}  {completed:>3}/{n}  "
-                f"{rate:>5.1f} req/s  ETA {eta_str:>6}  "
-                f"fails={failures}"
-            )
+            msg = f"  {label}  {completed:>3}/{n}  {rate:>5.1f} req/s  ETA {eta_str:>6}  fails={failures}"
             print(msg.ljust(78), end="\r", flush=True)
             last_print = now
 
@@ -248,14 +239,12 @@ async def main() -> None:
     runs: list[dict] = []
     for bs in args.batch_sizes:
         for r in range(args.repeats):
-            label = f"[bs={bs:>3}  run={r+1}/{args.repeats}]"
+            label = f"[bs={bs:>3}  run={r + 1}/{args.repeats}]"
             before = fetch_metrics() if metrics_ok else {}
             result = await run_one_batch(prompts, max_concurrency=bs, label=label)
             after = fetch_metrics() if metrics_ok else {}
 
-            delta = {
-                k: (after.get(k, 0.0) - before.get(k, 0.0)) for k in INTERESTING_METRICS
-            }
+            delta = {k: (after.get(k, 0.0) - before.get(k, 0.0)) for k in INTERESTING_METRICS}
             result["batch_size"] = bs
             result["run"] = r + 1
             result["metrics_delta"] = delta

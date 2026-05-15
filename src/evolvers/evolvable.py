@@ -125,7 +125,9 @@ class Evolvable:
         the full dataset, and accepts if the aggregate score improves over the best so far.
         """
         data = list(dataset)
-        _log(f"train: num_train_epochs={num_train_epochs}, dataset_size={len(data)}, criteria={[c.name for c in self.criteria]}")
+        _log(
+            f"train: num_train_epochs={num_train_epochs}, dataset_size={len(data)}, criteria={[c.name for c in self.criteria]}"
+        )
 
         _log("train: running baseline eval...")
         baseline = await self._run_eval(data, label="baseline", show_progress=show_progress)
@@ -310,7 +312,7 @@ class Evolvable:
             results = await asyncio.gather(
                 *(evaluate_criterion(c, program_input, output, self.llm) for c in self.criteria)
             )
-            for c, (score, reasoning) in zip(self.criteria, results):
+            for c, (score, reasoning) in zip(self.criteria, results, strict=True):
                 per_criterion[c.name] = {"score": score, "reasoning": reasoning}
 
         scores_summary = {k: round(v["score"], 2) for k, v in per_criterion.items()}
@@ -339,9 +341,7 @@ class Evolvable:
         t0 = time.perf_counter()
 
         # All trials fire concurrently; LLM's internal semaphore gates the actual transport.
-        trials = await asyncio.gather(
-            *(self._run_one_trial(row, idx, n) for idx, row in enumerate(data))
-        )
+        trials = await asyncio.gather(*(self._run_one_trial(row, idx, n) for idx, row in enumerate(data)))
 
         per_criterion_mean: dict[str, float] = {}
         total_weight = sum(c.weight for c in self.criteria) or 1.0

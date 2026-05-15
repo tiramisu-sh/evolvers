@@ -12,11 +12,11 @@ Evolvable AI programs: define a Python function + criteria of success, the bound
 
 ## Idea
 
-A program is a Python function with an injected `llm`. Criteria are either natural-language LLM judges or plain code, each scoring outputs in `[-1, 1]`. An LLM-driven optimizer proposes mutations to the function body; mutations that improve the weighted score are accepted, the rest are reverted. Artifacts are saved as a directory (`manifest.json` + `program.py` + `criteria/`) and loadable by URI.
+A program is a Python function with an injected `llm`. Criteria are either natural-language LLM judges or plain code, each scoring outputs in `[-1, 1]`. An LLM-driven optimizer proposes mutations to the function body; mutations that improve the weighted score are accepted, the rest are reverted. Trained programs save to disk and reload by URI.
 
 ## Quick look
 
-`evolvers` is async-primary — `train`, `evaluate`, and calling an `Evolvable` are coroutines. Concurrency is configured on the `LLM` and gates HTTP dispatch internally.
+`evolvers` is async-primary — `train`, `evaluate`, and calling an `Evolvable` are coroutines.
 
 End-to-end runnable example: fetch a small dataset with [`lurkers`](https://github.com/tiramisu-sh/lurkers), then train a TLDR program against it.
 
@@ -33,7 +33,7 @@ def tldr(input_text: str, llm) -> str:
     return input_text[:130] + "..."  # naive baseline; the optimizer rewrites this
 
 async def main():
-    # Bring your own data; here, three stable arXiv abstracts fetched in parallel.
+    # Bring your own data — here, three arXiv abstracts.
     docs = await asyncio.gather(
         lurkers.afetch("https://arxiv.org/abs/1706.03762"),  # Attention Is All You Need
         lurkers.afetch("https://arxiv.org/abs/2005.14165"),  # GPT-3
@@ -41,10 +41,7 @@ async def main():
     )
     dataset = [d.content for d in docs]
 
-    llm = ev.LLM(
-        model="claude-opus-4-7",   # or any OpenAI-compatible endpoint
-        max_concurrency=16,         # rate-limited API → keep low; vLLM → 64–256
-    )
+    llm = ev.LLM(model="claude-opus-4-7")  # or any OpenAI-compatible endpoint
 
     evo = ev.Evolvable(
         tldr,
@@ -65,7 +62,7 @@ async def main():
 asyncio.run(main())
 ```
 
-Sync wrappers (`evo.train_sync`, `evo.evaluate_sync`, `evo.call_sync`) exist for non-async codebases — they spin an event loop per call. See [`examples/with_lurkers.py`](examples/with_lurkers.py) for the full version.
+Sync wrappers (`evo.train_sync`, `evo.evaluate_sync`, `evo.call_sync`) exist for non-async codebases. See [`examples/with_lurkers.py`](examples/with_lurkers.py) for the full version.
 
 ## Install (from source)
 
@@ -77,11 +74,11 @@ uv sync
 
 ## What works today
 
-- `ev.LLM` against Anthropic and OpenAI-compatible endpoints (vLLM, Ollama, OpenAI, Azure); async-native with internal `asyncio.Semaphore(max_concurrency)` gating transport
+- `ev.LLM` against Anthropic and OpenAI-compatible endpoints (vLLM, Ollama, OpenAI, Azure)
 - Structured output via pydantic schemas (`schema=`)
 - `ev.judge(question)` + `ev.code(callable)` criteria; lambdas captured as `def` for round-tripping
-- `await evo.train(dataset, num_train_epochs=N)` — propose-test-accept-or-revert loop driven by the bound LLM (each epoch = one full propose + dataset-eval cycle, TRL-style)
-- `Evolvable.save("owner/name:variant")` / `Evolvable.load(...)` to/from `~/.cache/evolvers/`
+- `await evo.train(dataset, num_train_epochs=N)` — propose-test-accept-or-revert loop driven by the bound LLM
+- `Evolvable.save("owner/name:variant")` / `Evolvable.load(...)` for sharing trained programs
 - `Evolvable.clone().set_llm(other)` for variants
 
 Validated end-to-end against a local Qwen3.5-27B reasoning model: naive truncation baseline → optimized LLM-using TLDR in one mutation attempt.

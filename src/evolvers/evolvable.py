@@ -370,9 +370,13 @@ class Evolvable:
 
         def _desc(c: Criterion) -> str:
             if c.kind == "judge":
-                # __post_init__ enforces this; assert narrows for the type-checker
-                # and fails loudly if a future load-path bypasses the constructor.
-                assert c.question
+                # Criterion.__post_init__ already enforces this; re-check here so
+                # that any future deserialization path that bypasses the
+                # constructor (e.g. __new__ / pickle) fails loudly instead of
+                # embedding "None" into the mutation prompt. Raise (not assert)
+                # because asserts are stripped under `python -O`.
+                if not c.question:
+                    raise ValueError(f"judge criterion {c.name!r} has no question")
                 return c.question
             return c.source_code or "<code>"
 

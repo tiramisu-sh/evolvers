@@ -370,7 +370,7 @@ class Evolvable:
 
         criteria_desc = "\n".join(
             f"- {c.name} (weight={c.weight:.2f}, kind={c.kind}): "
-            + (c.question if c.kind == "judge" else (c.source_code or "<code>"))
+            + ((c.question or "<judge>") if c.kind == "judge" else (c.source_code or "<code>"))
             for c in self.criteria
         )
 
@@ -383,7 +383,9 @@ class Evolvable:
 
         last_trials_block = ""
         for h in reversed(recent):
-            result = h.get("result") or {}
+            result = h.get("result")
+            if not isinstance(result, dict):
+                continue
             trials = result.get("trials", [])
             if trials:
                 lines = []
@@ -490,7 +492,7 @@ def _extract_def_name(source: str) -> str | None:
 def _row_to_call(row: Any, sig: inspect.Signature) -> tuple[Any, tuple, dict]:
     params = [p for p in sig.parameters.values() if p.name != "llm"]
     if isinstance(row, dict):
-        kwargs = {k: v for k, v in row.items() if k in {p.name for p in sig.parameters}}
+        kwargs = {k: v for k, v in row.items() if k in sig.parameters}
         first_param = params[0].name if params else None
         program_input = kwargs.get(first_param) if first_param else row
         return program_input, (), kwargs

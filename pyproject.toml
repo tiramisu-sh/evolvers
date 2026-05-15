@@ -42,8 +42,11 @@ packages = ["src/evolvers"]
 
 [dependency-groups]
 dev = [
+    "pre-commit>=4.5.1",
     "pytest>=8.0",
-    "ruff>=0.6",
+    "ruff>=0.15.0",
+    # ty type checker (beta — local + pre-commit only, not in CI)
+    "ty>=0.0.33",
 ]
 
 [tool.ruff]
@@ -63,3 +66,9 @@ quote-style = "double"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+
+[tool.ty.environment]
+python-version = "3.10"
+
+[tool.ty.src]
+include = ["src", "tests"]

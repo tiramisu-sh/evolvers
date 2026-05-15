@@ -71,7 +71,9 @@ def test_evolvable_save_load(tmp_path, monkeypatch):
     assert reloaded.call_sync("hello world " * 30) == evo.call_sync("hello world " * 30)
     assert len(reloaded.criteria) == 1
     assert reloaded.criteria[0].name == "length"
-    assert reloaded.criteria[0].fn("x" * 300) == -1.0
+    fn = reloaded.criteria[0].fn
+    assert fn is not None
+    assert fn("x" * 300) == -1.0
 
 
 def test_evolvable_clone_and_set_llm():

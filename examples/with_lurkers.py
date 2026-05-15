@@ -16,6 +16,7 @@ After the run, two artifacts are persisted for later inspection:
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 import lurkers
@@ -62,7 +63,7 @@ def save_dataset(docs: list) -> None:
     print(f"saved {len(docs)} documents to {DATASET_PATH}", flush=True)
 
 
-def main() -> None:
+async def main() -> None:
     dataset, docs = build_dataset()
     if not dataset:
         print("no content fetched; aborting", flush=True)
@@ -79,11 +80,11 @@ def main() -> None:
         name="length",
     )
 
-    llm = ev.LLM(model="deepkek", base_url="http://localhost:8001/v1", api_key="dummy")
+    llm = ev.LLM(model="deepkek", base_url="http://localhost:8001/v1", api_key="dummy", max_concurrency=32)
     evo = ev.Evolvable(tldr, criteria=[cr_essential, cr_length], llm=llm)
 
     print("\n=== training ===", flush=True)
-    evo.train(dataset, budget=2, show_progress=False)
+    await evo.train(dataset, budget=2, show_progress=False)
 
     print("\n=== best source ===", flush=True)
     print(evo.source, flush=True)
@@ -95,8 +96,8 @@ def main() -> None:
     for d in dataset[:3]:
         preview = d[:120].replace("\n", " ")
         print(f"\nINPUT:  {preview}...", flush=True)
-        print(f"TLDR:   {evo(d)}", flush=True)
+        print(f"TLDR:   {await evo(d)}", flush=True)
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

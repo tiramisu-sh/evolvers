@@ -3,6 +3,7 @@
 Run: uv run python -u examples/smoke_test_local.py 2>&1 | tee smoke_test_local.log
 """
 
+import asyncio
 import os
 import tempfile
 
@@ -23,7 +24,7 @@ def tldr(input_text: str, llm) -> str:
     return input_text[:130] + "..."
 
 
-def main() -> None:
+async def main() -> None:
     cr_essential = ev.judge(
         "Does it directly summarize the main points as a TLDR (concise, captures the key claim and its implication)?",
         name="essential",
@@ -33,11 +34,11 @@ def main() -> None:
         name="length",
     )
 
-    llm = ev.LLM(model="deepkek", base_url="http://localhost:8001/v1", api_key="dummy")
+    llm = ev.LLM(model="deepkek", base_url="http://localhost:8001/v1", api_key="dummy", max_concurrency=16)
     evo = ev.Evolvable(tldr, criteria=[cr_essential, cr_length], llm=llm)
 
     print("=== train budget=1 ===", flush=True)
-    result = evo.train(DATASET, budget=1, show_progress=False)
+    result = await evo.train(DATASET, budget=1, show_progress=False)
     print(f"best_score={result['best_score']:.3f}", flush=True)
 
     print("=== best source ===", flush=True)
@@ -49,8 +50,8 @@ def main() -> None:
         "over GPT-5.4) via mixture-of-experts routing improvements. Pricing drops to "
         "$0.50/M input tokens and $2/M output."
     )
-    print(repr(evo(new_input)), flush=True)
+    print(repr(await evo(new_input)), flush=True)
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

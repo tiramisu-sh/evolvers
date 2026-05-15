@@ -1,3 +1,10 @@
+"""End-to-end example: train + evaluate + save + load, two LLM backends.
+
+Run:
+    uv run python -u examples/main.py
+"""
+
+import asyncio
 import os
 
 import evolvers as ev
@@ -26,6 +33,8 @@ eval_dataset = [
 
 # defining an evolvable function / program
 # `llm` is auto-injected at call time from the bound LLM on the Evolvable.
+# The function can be sync OR async. Sync is fine for naive baselines; switch
+# to `async def` when the function makes real LLM calls (use `await llm(...)`).
 def tldr_template(input_text: str, llm) -> str:
     return input_text[:130] + "..."  # naive baseline; the optimizer rewrites this body
 
@@ -35,52 +44,67 @@ def tldr_template(input_text: str, llm) -> str:
 cr_essential = ev.judge("Does it directly summarize the main points as a 'TLDR'?")
 cr_length = ev.code(lambda output_text: max(-1.0, 1 - 2 * max(0, (len(output_text) - 140) / 140)))
 
-llm_opus = ev.LLM(model="claude-opus-4-7", api_key=os.getenv("CLAUDE_API_KEY"))
+
+async def main() -> None:
+    # Concurrency lives on the LLM. Tune max_concurrency to your endpoint:
+    # ~8-16 for rate-limited APIs (Anthropic, OpenAI), ~128+ for dedicated vLLM clusters.
+    llm_opus = ev.LLM(
+        model="claude-opus-4-7",
+        api_key=os.getenv("CLAUDE_API_KEY"),
+        max_concurrency=16,
+    )
+
+    tldr_opus = ev.Evolvable(
+        tldr_template,
+        criteria=[cr_essential, cr_length],  # each criterion returns a score between -1 and 1
+        llm=llm_opus,
+    )
+
+    # training the evolvable function
+    await tldr_opus.train(
+        dataset=dataset,
+        budget=10,
+        show_progress=True,
+    )
+
+    # evaluating the evolvable function
+    await tldr_opus.evaluate(
+        dataset=eval_dataset,
+        show_progress=True,
+    )
+
+    # saving the evolvable function
+    tldr_opus.save("vvsotnikov/tldr-v1:claude-opus-4-7")
+
+    # retrain with local LLM (dedicated vLLM cluster can take much higher concurrency)
+    llm_local = ev.LLM(
+        model="qwen/qwen-3.6-32b",
+        api_key="1234",
+        base_url="http://localhost:8001/v1",
+        max_concurrency=128,
+    )
+
+    tldr_local = tldr_opus.clone().set_llm(llm_local)
+
+    await tldr_local.train(
+        dataset=dataset,
+        budget=10,
+        show_progress=True,
+    )
+
+    await tldr_local.evaluate(
+        dataset=eval_dataset,
+        show_progress=True,
+    )
+
+    tldr_local.save(
+        "vvsotnikov/tldr-v1:qwen-3.6-32b"
+    )  # shares the same signature; optimized for a different LLM; docker image-inspired
+
+    # using the evolvable function
+    tldr_local = ev.Evolvable.load("vvsotnikov/tldr-v1:qwen-3.6-32b")
+    print(await tldr_local("very long text 1"))
 
 
-tldr_opus = ev.Evolvable(
-    tldr_template,
-    criteria=[cr_essential, cr_length],  # each criterion returns a score between -1 and 1
-    llm=llm_opus,
-)
-
-# training the evolvable function
-metrics = tldr_opus.train(
-    dataset=dataset,
-    budget=10,
-    show_progress=True,
-)
-
-# evaluating the evolvable function
-metrics = tldr_opus.evaluate(
-    dataset=eval_dataset,
-    show_progress=True,
-)
-
-# saving the evolvable function
-tldr_opus.save("vvsotnikov/tldr-v1:claude-opus-4-7")
-
-# retrain with local LLM
-llm_local = ev.LLM(model="qwen/qwen-3.6-32b", api_key="1234", base_url="http://localhost:8001/v1")
-
-tldr_local = tldr_opus.clone().set_llm(llm_local)
-
-metrics = tldr_local.train(
-    dataset=dataset,
-    budget=10,
-    show_progress=True,
-)
-
-metrics = tldr_local.evaluate(
-    dataset=eval_dataset,
-    show_progress=True,
-)
-
-tldr_local.save(
-    "vvsotnikov/tldr-v1:qwen-3.6-32b"
-)  # shares the same signature; optimized for a different LLM; docker image-inspired
-
-# using the evolvable function
-tldr_local = ev.Evolvable.load("vvsotnikov/tldr-v1:qwen-3.6-32b")
-
-print(tldr_local("very long text 1"))
+if __name__ == "__main__":
+    asyncio.run(main())

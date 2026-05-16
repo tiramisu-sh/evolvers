@@ -1,6 +1,6 @@
 [project]
 name = "evolvers"
-version = "0.1.0"
+version = "0.2.0"
 description = "Evolvable AI programs: define a function + criteria, let an LLM iteratively improve it"
 readme = "README.md"
 requires-python = ">=3.13"

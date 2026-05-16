@@ -15,7 +15,6 @@ import inspect
 import json
 import os
 import re
-import sys
 import textwrap
 import time
 import traceback
@@ -25,13 +24,9 @@ from typing import Any
 
 from tqdm.auto import tqdm
 
+from ._logging import log
 from .criterion import Criterion, evaluate_criterion
 from .llm import LLM
-
-
-def _log(msg: str) -> None:
-    """Timestamped, flushed log line on stderr."""
-    print(f"[{time.strftime('%H:%M:%S')}] evolvers: {msg}", file=sys.stderr, flush=True)
 
 
 class Evolvable:
@@ -125,11 +120,14 @@ class Evolvable:
         the full dataset, and accepts if the aggregate score improves over the best so far.
         """
         data = list(dataset)
-        _log(
-            f"train: num_train_epochs={num_train_epochs}, dataset_size={len(data)}, criteria={[c.name for c in self.criteria]}"
+        log.info(
+            "train_start",
+            num_train_epochs=num_train_epochs,
+            dataset_size=len(data),
+            criteria=[c.name for c in self.criteria],
         )
 
-        _log("train: running baseline eval...")
+        log.info("baseline_eval_start")
         baseline = await self._run_eval(data, label="baseline", show_progress=show_progress)
         self._best_score = baseline["aggregate"]
         self._best_source = self._source
@@ -151,30 +149,35 @@ class Evolvable:
 
         for epoch in iterator:
             entry: dict[str, Any] = {"epoch": epoch, "accepted": False}
-            _log(f"train: epoch {epoch}/{num_train_epochs} — proposing mutation...")
+            log.info("epoch_start", epoch=epoch, total=num_train_epochs)
             t_propose = time.perf_counter()
             try:
                 new_source = await self._propose_mutation()
             except Exception as e:
                 entry["error"] = f"propose failed: {type(e).__name__}: {e}"
-                _log(f"train: epoch {epoch} — {entry['error']}")
+                log.warning("propose_failed", epoch=epoch, error=f"{type(e).__name__}: {e}")
                 self.history.append(entry)
                 continue
             propose_elapsed = time.perf_counter() - t_propose
-            _log(f"train: epoch {epoch} — mutation proposed ({propose_elapsed:.1f}s, {len(new_source)} chars)")
+            log.info(
+                "mutation_proposed",
+                epoch=epoch,
+                elapsed_s=round(propose_elapsed, 1),
+                source_chars=len(new_source),
+            )
 
             try:
                 new_fn = _compile_fn(new_source)
             except Exception as e:
                 entry["source"] = new_source
                 entry["error"] = f"compile failed: {type(e).__name__}: {e}"
-                _log(f"train: epoch {epoch} — compile failed: {e}")
+                log.warning("compile_failed", epoch=epoch, error=f"{type(e).__name__}: {e}")
                 self.history.append(entry)
                 continue
 
             prev_compiled = self._compiled
             self._compiled = new_fn
-            _log(f"train: epoch {epoch} — evaluating new candidate...")
+            log.info("candidate_eval_start", epoch=epoch)
             try:
                 result = await self._run_eval(data, label=f"epoch {epoch}", show_progress=False)
                 entry["score"] = result["aggregate"]
@@ -186,25 +189,33 @@ class Evolvable:
                     self._best_score = result["aggregate"]
                     self._best_source = new_source
                     entry["accepted"] = True
-                    _log(f"train: epoch {epoch} — ACCEPTED, new best aggregate={result['aggregate']:.3f}")
+                    log.info("epoch_accepted", epoch=epoch, aggregate=result["aggregate"])
                 else:
                     self._compiled = prev_compiled
-                    _log(
-                        f"train: epoch {epoch} — REVERTED, "
-                        f"aggregate={result['aggregate']:.3f} <= best={self._best_score:.3f}"
+                    log.info(
+                        "epoch_reverted",
+                        epoch=epoch,
+                        aggregate=result["aggregate"],
+                        best=self._best_score,
                     )
             except Exception as e:
                 self._compiled = prev_compiled
+                tb = traceback.format_exc(limit=3)
                 entry["source"] = new_source
                 entry["error"] = f"eval failed: {type(e).__name__}: {e}"
-                entry["traceback"] = traceback.format_exc(limit=3)
-                _log(f"train: epoch {epoch} — eval crashed: {e}")
+                entry["traceback"] = tb
+                log.warning(
+                    "epoch_eval_crashed",
+                    epoch=epoch,
+                    error=f"{type(e).__name__}: {e}",
+                    traceback=tb,
+                )
 
             self.history.append(entry)
 
         self._compiled = _compile_fn(self._best_source)
         self._source = self._best_source
-        _log(f"train: done. best_score={self._best_score:.3f}")
+        log.info("train_done", best_score=self._best_score)
         return {
             "best_score": self._best_score,
             "best_source": self._best_source,
@@ -251,7 +262,7 @@ class Evolvable:
             "saved_at": time.time(),
         }
         (path / "manifest.json").write_text(json.dumps(manifest, indent=2))
-        _log(f"saved to {path}")
+        log.info("saved", uri=uri, path=str(path))
         return path
 
     @classmethod
@@ -288,12 +299,17 @@ class Evolvable:
         instance._best_score = manifest.get("best_score")
         instance._compiled = fn
         instance.history = []
-        _log(f"loaded {uri} (best_score={manifest.get('best_score')})")
+        log.info("loaded", uri=uri, best_score=manifest.get("best_score"))
         return instance
 
     async def _run_one_trial(self, row: Any, idx: int, total: int) -> dict[str, Any]:
         program_input, call_args, call_kwargs = _row_to_call(row, self._signature)
-        _log(f"  trial {idx + 1}/{total} starting (input={_truncate(repr(program_input), 80)})")
+        log.debug(
+            "trial_start",
+            trial=idx + 1,
+            total=total,
+            input=_truncate(repr(program_input), 80),
+        )
         t0 = time.perf_counter()
         try:
             output = await self(*call_args, **call_kwargs)
@@ -317,9 +333,14 @@ class Evolvable:
 
         scores_summary = {k: round(v["score"], 2) for k, v in per_criterion.items()}
         elapsed = time.perf_counter() - t0
-        _log(
-            f"  trial {idx + 1}/{total} done ({elapsed:.1f}s, "
-            f"output={_truncate(repr(output), 80)}, scores={scores_summary})"
+        log.debug(
+            "trial_done",
+            trial=idx + 1,
+            total=total,
+            elapsed_s=round(elapsed, 1),
+            output=_truncate(repr(output), 80),
+            scores=scores_summary,
+            **({"error": err} if err is not None else {}),
         )
         return {
             "input": program_input,
@@ -337,7 +358,7 @@ class Evolvable:
         show_progress: bool,
     ) -> dict[str, Any]:
         n = len(data)
-        _log(f"eval [{label}]: starting on {n} rows (llm.max_concurrency={self.llm.max_concurrency})")
+        log.info("eval_start", label=label, rows=n, max_concurrency=self.llm.max_concurrency)
         t0 = time.perf_counter()
 
         # All trials fire concurrently; LLM's internal semaphore gates the actual transport.
@@ -351,9 +372,12 @@ class Evolvable:
         aggregate = sum(per_criterion_mean[c.name] * c.weight for c in self.criteria) / total_weight
 
         elapsed = time.perf_counter() - t0
-        _log(
-            f"eval [{label}]: done in {elapsed:.1f}s — aggregate={aggregate:.3f} "
-            f"per_criterion={ {k: round(v, 3) for k, v in per_criterion_mean.items()} }"
+        log.info(
+            "eval_done",
+            label=label,
+            elapsed_s=round(elapsed, 1),
+            aggregate=aggregate,
+            per_criterion=per_criterion_mean,
         )
 
         return {

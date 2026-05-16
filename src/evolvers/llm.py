@@ -21,6 +21,9 @@ class LLM:
     coroutines as they like; coroutines that can't acquire a slot park cheaply on
     the event loop until one frees.
 
+    Transient failures (429, 5xx, connection errors) are retried by the SDK with
+    exponential backoff + jitter, honoring Retry-After; `max_retries` sizes that.
+
     Detection: explicit `base_url` → OpenAI-compatible; model starts with "claude"
     → Anthropic; otherwise OpenAI. Pass `api_key` to override the SDK's env-var
     default.
@@ -39,12 +42,17 @@ class LLM:
         # Conservative default: safe for rate-limited hosted APIs out of the box.
         # Raise it (64-256) for a dedicated endpoint like vLLM with more headroom.
         max_concurrency: int = 16,
+        # Forwarded to the SDK client, which already does exponential backoff +
+        # jitter and honors Retry-After. The SDK's own default of 2 is too low to
+        # ride out a rate-limit window across a long training run.
+        max_retries: int = 8,
     ):
         self.model = model
         self.base_url = base_url
         self.provider = provider or self._detect_provider(model, base_url)
         self._api_key = api_key
         self.max_concurrency = max_concurrency
+        self.max_retries = max_retries
         self._sem = asyncio.Semaphore(max_concurrency)
         self._client: Any = None  # lazy-init
 
@@ -62,13 +70,18 @@ class LLM:
         if self.provider == "anthropic":
             from anthropic import AsyncAnthropic
 
-            self._client = AsyncAnthropic(api_key=self._api_key) if self._api_key else AsyncAnthropic()
+            self._client = (
+                AsyncAnthropic(api_key=self._api_key, max_retries=self.max_retries)
+                if self._api_key
+                else AsyncAnthropic(max_retries=self.max_retries)
+            )
         else:
             from openai import AsyncOpenAI
 
             self._client = AsyncOpenAI(
                 api_key=self._api_key or os.environ.get("OPENAI_API_KEY", "EMPTY"),
                 base_url=self.base_url,
+                max_retries=self.max_retries,
             )
 
     async def __call__(
@@ -156,6 +169,8 @@ class LLM:
         messages.append({"role": "user", "content": prompt})
 
         if schema is not None:
+            from openai import BadRequestError
+
             try:
                 resp = await self._client.beta.chat.completions.parse(
                     model=self.model,
@@ -163,27 +178,35 @@ class LLM:
                     response_format=schema,
                     max_tokens=max_tokens,
                 )
-                parsed = resp.choices[0].message.parsed
-                if parsed is None:
-                    raise RuntimeError("openai parse returned None")
-                return parsed
-            except Exception:
-                resp = await self._client.chat.completions.create(
-                    model=self.model,
-                    messages=[
-                        *messages[:-1],
-                        {
-                            "role": "user",
-                            "content": (
-                                f"{prompt}\n\nReply with a JSON object matching this schema:\n"
-                                f"{json.dumps(schema.model_json_schema(), indent=2)}"
-                            ),
-                        },
-                    ],
-                    response_format={"type": "json_object"},
-                    max_tokens=max_tokens,
-                )
-                return schema.model_validate_json(resp.choices[0].message.content)
+                message = resp.choices[0].message
+                if message.parsed is not None:
+                    return message.parsed
+                if message.refusal:
+                    raise RuntimeError(f"model refused the request: {message.refusal}")
+                # parse returned nothing — fall through to the JSON-mode path
+            except BadRequestError:
+                # Endpoint doesn't support the structured-output (.parse) path —
+                # fall through to JSON mode. Transient/terminal errors (rate
+                # limit, auth, connection) are deliberately NOT caught: they
+                # propagate instead of being masked by the fallback.
+                pass
+
+            resp = await self._client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    *messages[:-1],
+                    {
+                        "role": "user",
+                        "content": (
+                            f"{prompt}\n\nReply with a JSON object matching this schema:\n"
+                            f"{json.dumps(schema.model_json_schema(), indent=2)}"
+                        ),
+                    },
+                ],
+                response_format={"type": "json_object"},
+                max_tokens=max_tokens,
+            )
+            return schema.model_validate_json(resp.choices[0].message.content)
 
         resp = await self._client.chat.completions.create(
             model=self.model,
@@ -193,4 +216,7 @@ class LLM:
         return resp.choices[0].message.content or ""
 
     def __repr__(self) -> str:
-        return f"LLM(model={self.model!r}, provider={self.provider!r}, max_concurrency={self.max_concurrency})"
+        return (
+            f"LLM(model={self.model!r}, provider={self.provider!r}, "
+            f"max_concurrency={self.max_concurrency}, max_retries={self.max_retries})"
+        )

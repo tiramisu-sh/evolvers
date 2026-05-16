@@ -39,6 +39,20 @@ def test_llm_provider_detection():
     assert ev.LLM(model="deepkek", base_url="http://localhost:8001/v1", api_key="x").provider == "openai"
 
 
+def test_llm_max_retries():
+    # default (8) is stored and forwarded to the SDK client — anthropic branch
+    a = ev.LLM(model="claude-opus-4-7", api_key="x")
+    assert a.max_retries == 8
+    a._ensure_client()
+    assert a._client.max_retries == 8
+
+    # explicit value is stored and forwarded — openai branch
+    o = ev.LLM(model="gpt-4", api_key="x", max_retries=3)
+    assert o.max_retries == 3
+    o._ensure_client()
+    assert o._client.max_retries == 3
+
+
 def test_evolvable_local_call():
     def tldr(input_text: str, llm) -> str:
         return input_text[:130] + "..."

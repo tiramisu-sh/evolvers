@@ -36,7 +36,9 @@ class LLM:
         api_key: str | None = None,
         base_url: str | None = None,
         provider: Provider | None = None,
-        max_concurrency: int = 128,
+        # Conservative default: safe for rate-limited hosted APIs out of the box.
+        # Raise it (64-256) for a dedicated endpoint like vLLM with more headroom.
+        max_concurrency: int = 16,
     ):
         self.model = model
         self.base_url = base_url

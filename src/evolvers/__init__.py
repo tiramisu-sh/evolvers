@@ -5,4 +5,4 @@ from .evolvable import Evolvable
 from .llm import LLM
 
 __all__ = ["LLM", "Criterion", "Evolvable", "code", "judge"]
-__version__ = "0.1.0"
+__version__ = "0.2.0"

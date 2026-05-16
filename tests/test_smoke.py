@@ -39,6 +39,11 @@ def test_llm_provider_detection():
     assert ev.LLM(model="deepkek", base_url="http://localhost:8001/v1", api_key="x").provider == "openai"
 
 
+def test_llm_max_retries():
+    assert ev.LLM(model="claude-opus-4-7").max_retries == 8
+    assert ev.LLM(model="claude-opus-4-7", max_retries=3).max_retries == 3
+
+
 def test_evolvable_local_call():
     def tldr(input_text: str, llm) -> str:
         return input_text[:130] + "..."

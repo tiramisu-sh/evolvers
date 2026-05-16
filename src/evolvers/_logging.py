@@ -4,6 +4,9 @@ Human-readable, colorized console output by default. Set `EVOLVERS_LOG_FORMAT=js
 for line-delimited JSON (log aggregation / downstream parsing). `EVOLVERS_LOG_LEVEL`
 (default `INFO`) filters by level — set it to `DEBUG` to see per-trial events.
 
+Both env vars are read once, when `evolvers` is first imported — set them before
+`import evolvers`.
+
 If the host application has already called `structlog.configure()`, evolvers
 defers to that configuration rather than clobbering it.
 """
@@ -22,7 +25,10 @@ def _build_logger() -> Any:
     if not structlog.is_configured():
         json_mode = os.environ.get("EVOLVERS_LOG_FORMAT", "").lower() == "json"
         level_name = os.environ.get("EVOLVERS_LOG_LEVEL", "INFO").upper()
-        level = getattr(logging, level_name, logging.INFO)
+        level = logging.getLevelNamesMapping().get(level_name)
+        if level is None:
+            print(f"evolvers: unknown EVOLVERS_LOG_LEVEL={level_name!r}, using INFO", file=sys.stderr)
+            level = logging.INFO
 
         structlog.configure(
             processors=[

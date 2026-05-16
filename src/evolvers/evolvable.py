@@ -200,10 +200,16 @@ class Evolvable:
                     )
             except Exception as e:
                 self._compiled = prev_compiled
+                tb = traceback.format_exc(limit=3)
                 entry["source"] = new_source
                 entry["error"] = f"eval failed: {type(e).__name__}: {e}"
-                entry["traceback"] = traceback.format_exc(limit=3)
-                log.warning("epoch_eval_crashed", epoch=epoch, error=f"{type(e).__name__}: {e}")
+                entry["traceback"] = tb
+                log.warning(
+                    "epoch_eval_crashed",
+                    epoch=epoch,
+                    error=f"{type(e).__name__}: {e}",
+                    traceback=tb,
+                )
 
             self.history.append(entry)
 

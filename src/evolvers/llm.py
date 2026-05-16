@@ -169,6 +169,8 @@ class LLM:
         messages.append({"role": "user", "content": prompt})
 
         if schema is not None:
+            from openai import BadRequestError
+
             try:
                 resp = await self._client.beta.chat.completions.parse(
                     model=self.model,
@@ -177,26 +179,32 @@ class LLM:
                     max_tokens=max_tokens,
                 )
                 parsed = resp.choices[0].message.parsed
-                if parsed is None:
-                    raise RuntimeError("openai parse returned None")
-                return parsed
-            except Exception:
-                resp = await self._client.chat.completions.create(
-                    model=self.model,
-                    messages=[
-                        *messages[:-1],
-                        {
-                            "role": "user",
-                            "content": (
-                                f"{prompt}\n\nReply with a JSON object matching this schema:\n"
-                                f"{json.dumps(schema.model_json_schema(), indent=2)}"
-                            ),
-                        },
-                    ],
-                    response_format={"type": "json_object"},
-                    max_tokens=max_tokens,
-                )
-                return schema.model_validate_json(resp.choices[0].message.content)
+                if parsed is not None:
+                    return parsed
+                # parse returned nothing — fall through to the JSON-mode path
+            except BadRequestError:
+                # Endpoint doesn't support the structured-output (.parse) path —
+                # fall through to JSON mode. Transient/terminal errors (rate
+                # limit, auth, connection) are deliberately NOT caught: they
+                # propagate instead of being masked by the fallback.
+                pass
+
+            resp = await self._client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    *messages[:-1],
+                    {
+                        "role": "user",
+                        "content": (
+                            f"{prompt}\n\nReply with a JSON object matching this schema:\n"
+                            f"{json.dumps(schema.model_json_schema(), indent=2)}"
+                        ),
+                    },
+                ],
+                response_format={"type": "json_object"},
+                max_tokens=max_tokens,
+            )
+            return schema.model_validate_json(resp.choices[0].message.content)
 
         resp = await self._client.chat.completions.create(
             model=self.model,

@@ -340,6 +340,7 @@ class Evolvable:
             elapsed_s=round(elapsed, 1),
             output=_truncate(repr(output), 80),
             scores=scores_summary,
+            **({"error": err} if err is not None else {}),
         )
         return {
             "input": program_input,

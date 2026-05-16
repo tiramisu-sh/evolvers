@@ -178,9 +178,11 @@ class LLM:
                     response_format=schema,
                     max_tokens=max_tokens,
                 )
-                parsed = resp.choices[0].message.parsed
-                if parsed is not None:
-                    return parsed
+                message = resp.choices[0].message
+                if message.parsed is not None:
+                    return message.parsed
+                if message.refusal:
+                    raise RuntimeError(f"model refused the request: {message.refusal}")
                 # parse returned nothing — fall through to the JSON-mode path
             except BadRequestError:
                 # Endpoint doesn't support the structured-output (.parse) path —

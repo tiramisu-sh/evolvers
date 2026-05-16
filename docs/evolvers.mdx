@@ -1,0 +1,112 @@
+---
+title: evolvers
+description: Compiles your intent and taste into self-improving artifacts. Provide criteria, examples, or both — the LLM iterates toward what you meant.
+---
+
+`evolvers` compiles your intent and taste into self-improving artifacts. Provide criteria, examples, or both — the LLM iterates toward what you meant.
+
+## Install
+
+```bash
+uv add evolvers lurkers
+```
+
+`lurkers` is optional — only the Quick start uses it. For your own data, `uv add evolvers` is enough.
+
+## Quick start
+
+`evolvers` is async-primary — `train`, `evaluate`, and calling an `Evolvable` are coroutines.
+
+End-to-end runnable example: fetch a small dataset with [`lurkers`](/docs/lurkers), then train a TLDR program against it.
+
+```python
+import asyncio
+import evolvers as ev
+import lurkers
+
+def tldr(input_text: str, llm) -> str:
+    """Summarize input_text as a TLDR (~140 chars)."""
+    return input_text[:130] + "..."
+
+async def main():
+    # Bring your own data — here, three arXiv abstracts.
+    docs = await asyncio.gather(
+        lurkers.afetch("https://arxiv.org/abs/1706.03762"),  # Attention Is All You Need
+        lurkers.afetch("https://arxiv.org/abs/2005.14165"),  # GPT-3
+        lurkers.afetch("https://arxiv.org/abs/2310.06825"),  # Mistral 7B
+    )
+    dataset = [d.content for d in docs]
+
+    llm = ev.LLM(model="claude-opus-4-7")
+
+    evo = ev.Evolvable(
+        tldr,
+        criteria=[
+            ev.judge("Does it directly summarize the main points as a TLDR?"),
+            ev.code(
+                lambda output_text:
+                max(-1.0, 1 - 2 * max(0, (len(output_text) - 140) / 140))
+            ),
+        ],
+        llm=llm,
+    )
+
+    await evo.train(dataset, num_train_epochs=10)
+    print(evo.source)  # the function body the optimizer settled on
+    evo.save("you/tldr-v1:claude-opus-4-7")
+
+    reloaded = ev.Evolvable.load("you/tldr-v1:claude-opus-4-7")
+    print(await reloaded(dataset[0]))
+
+asyncio.run(main())
+```
+
+Sync wrappers (`evo.train_sync`, `evo.evaluate_sync`, `evo.call_sync`) exist for non-async codebases.
+
+## Concepts
+
+### `Evolvable`
+
+Wraps a function, its criteria, and an `LLM`. Calling it runs the function; if the function has an `llm` parameter, the bound `LLM` is passed in. Your function can be sync or async — both work.
+
+After training, `evo.source` is the function body the optimizer produced — read it to see what it wrote.
+
+| Method | What it does |
+|---|---|
+| `await evo.train(dataset, num_train_epochs=N)` | Propose-test-accept-or-revert loop. Each epoch proposes a new function body, scores it against the dataset, and keeps it only if the score improves. `num_train_epochs` defaults to `20`. Returns a dict with `best_score`, `best_source`, and `history`. |
+| `await evo.evaluate(dataset)` | Scores the current version without changing it. Returns a dict with the `aggregate` score and a `per_criterion` breakdown. |
+| `await evo(input)` | Runs the current best version on one input. |
+| `evo.save("owner/name:variant")` | Saves the program and its criteria under `~/.cache/evolvers/` (override the location with the `EVOLVERS_CACHE` env var). |
+| `Evolvable.load("owner/name:variant")` | Loads a saved program. |
+| `evo.clone().set_llm(other_llm)` | A copy bound to a different `LLM`. |
+| `evo.train_sync(...)` / `evo.evaluate_sync(...)` / `evo.call_sync(...)` | Sync wrappers for non-async codebases. |
+
+### `Criterion`
+
+Two kinds of criterion. Mix them freely — each has a `weight`, and the score is the weighted mean.
+
+| Factory | What it scores |
+|---|---|
+| `ev.judge(question)` | Natural-language LLM-as-judge. Sees the program's input and output; returns a score in `[-1, 1]` plus reasoning. |
+| `ev.code(callable)` | A plain Python function. Takes one argument (the output) or two (`input, output`); returns a number in `[-1, 1]`. |
+
+### `LLM`
+
+One wrapper for Anthropic and any OpenAI-compatible endpoint. Same interface for both:
+
+```python
+opus  = ev.LLM(model="claude-opus-4-7")
+local = ev.LLM(model="deepkek", base_url="http://localhost:8001/v1")
+```
+
+Credentials come from the standard provider env vars (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`); pass `api_key=` to override.
+
+| Method | What it does |
+|---|---|
+| `await llm(prompt, *, schema=..., system=...)` | Single call. Returns `str`, or a parsed pydantic instance if `schema` is given. |
+| `await llm.batch(prompts, **kwargs)` | Runs many prompts concurrently. |
+| `llm.call_sync(...)` / `llm.batch_sync(...)` | Sync wrappers. |
+
+## Source
+
+[github.com/tiramisu-sh/evolvers](https://github.com/tiramisu-sh/evolvers) · Apache-2.0

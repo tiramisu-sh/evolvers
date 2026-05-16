@@ -40,8 +40,17 @@ def test_llm_provider_detection():
 
 
 def test_llm_max_retries():
-    assert ev.LLM(model="claude-opus-4-7").max_retries == 8
-    assert ev.LLM(model="claude-opus-4-7", max_retries=3).max_retries == 3
+    # default (8) is stored and forwarded to the SDK client — anthropic branch
+    a = ev.LLM(model="claude-opus-4-7", api_key="x")
+    assert a.max_retries == 8
+    a._ensure_client()
+    assert a._client.max_retries == 8
+
+    # explicit value is stored and forwarded — openai branch
+    o = ev.LLM(model="gpt-4", api_key="x", max_retries=3)
+    assert o.max_retries == 3
+    o._ensure_client()
+    assert o._client.max_retries == 3
 
 
 def test_evolvable_local_call():
